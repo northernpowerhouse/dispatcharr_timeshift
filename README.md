@@ -192,6 +192,24 @@ dispatcharr_timeshift/
 └── README.md     # This file
 ```
 
+## FAQ
+
+### Does timeshift work with custom channels that have multiple streams?
+
+Yes, but only the **first stream** (by priority order) determines timeshift availability. The plugin checks `tv_archive` from the first stream's `custom_properties`.
+
+### What about channels with mixed sources (Xtream + non-Xtream)?
+
+Timeshift will only appear if the **first priority stream** is from an Xtream Codes provider with `tv_archive=1`.
+
+Example scenarios:
+- Stream #1 is XC with timeshift → ✅ Timeshift appears
+- Stream #1 is non-XC, Stream #2 is XC with timeshift → ❌ Timeshift does NOT appear
+
+**Important**: For timeshift to actually work when playing, the XC stream with timeshift support must be the one being played. If a non-XC stream takes priority during playback, timeshift won't function even if shown in the channel list.
+
+**Recommendation**: For channels where you want timeshift, ensure the XC stream with `tv_archive=1` is set as the **first priority** stream.
+
 ## Troubleshooting
 
 ### Channels don't show timeshift option in iPlayTV

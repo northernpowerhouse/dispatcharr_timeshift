@@ -103,8 +103,11 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
 
     logger.info(f"[Timeshift] Proxying to provider for channel: {channel.name}")
 
-    # Step 8: Proxy the stream
-    return _proxy_stream(request, timeshift_url)
+    # Step 8: Get User-Agent from M3U account settings
+    user_agent = m3u_account.get_user_agent().user_agent
+
+    # Step 9: Proxy the stream
+    return _proxy_stream(request, timeshift_url, user_agent)
 
 
 def _authenticate_user(username, password):
@@ -161,18 +164,23 @@ def _find_channel_by_provider_stream_id(provider_stream_id):
     return None, None
 
 
-def _proxy_stream(request, url):
+def _proxy_stream(request, url, user_agent):
     """
     Proxy video stream from provider to client.
 
     Supports HTTP Range requests for seek/forward/rewind functionality.
     iPlayTV sends Range headers when user seeks in the timeline.
 
+    Args:
+        request: Django request object
+        url: Provider's timeshift URL
+        user_agent: User-Agent string from M3U account settings
+
     Returns:
         StreamingHttpResponse with video content (status 200 or 206)
     """
     headers = {
-        'User-Agent': request.META.get('HTTP_USER_AGENT', 'Dispatcharr-Timeshift/1.0')
+        'User-Agent': user_agent
     }
 
     # Forward Range header for seek support
