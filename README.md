@@ -6,6 +6,27 @@ Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 da
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
+---
+
+## ⚠️ IMPORTANT: Installation from GitHub
+
+When downloading this plugin from GitHub (via "Download ZIP"), the folder will be named `dispatcharr_timeshift-main` (GitHub adds `-main` suffix for the main branch).
+
+**You MUST rename it to `dispatcharr_timeshift`** for the plugin to load correctly:
+
+```bash
+# After extracting the ZIP to your plugins directory:
+cd /path/to/dispatcharr/data/plugins/
+mv dispatcharr_timeshift-main dispatcharr_timeshift
+
+# Then restart Dispatcharr
+docker compose restart dispatcharr
+```
+
+If you don't rename the folder, the plugin **will not load** and timeshift features won't be available.
+
+---
+
 ## Changelog
 
 ### v1.0.3
