@@ -261,6 +261,18 @@ dispatcharr_timeshift/
 
 ## FAQ
 
+### Does the plugin proxy the stream or pass the provider URL to the client?
+
+**The plugin proxies all streams through Dispatcharr.** It does NOT pass the provider's catch-up URL directly to the client.
+
+How it works:
+1. Client sends request to Dispatcharr: `/timeshift/user/pass/.../stream_id.ts`
+2. Plugin intercepts the request
+3. Dispatcharr fetches the stream from the XC provider
+4. Stream is proxied back to the client
+
+**VPN use case**: If you need all XC provider traffic to go through a VPN, simply connect Dispatcharr to the VPN. All timeshift (and live) streams will be fetched through the VPN, while your clients connect directly to Dispatcharr without needing VPN apps.
+
 ### Does timeshift work with custom channels that have multiple streams?
 
 Yes, but only the **first stream** (by priority order) determines timeshift availability. The plugin checks `tv_archive` from the first stream's `custom_properties`.
