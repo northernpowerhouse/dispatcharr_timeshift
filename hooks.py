@@ -312,9 +312,39 @@ def _patch_stream_xc():
                 pass
 
         if not channel:
-            logger.warning(f"[Timeshift] Live: Channel not found for ID={channel_id_str}. "
-                          f"Checked: provider_stream_id lookup, internal_id lookup. "
-                          f"User: {username}")
+            # Gather diagnostic info to help users troubleshoot
+            diagnostics = []
+
+            # Check if stream exists with this ID but wrong account type
+            stream_any_type = Stream.objects.filter(
+                custom_properties__stream_id=channel_id_str
+            ).first()
+            if stream_any_type:
+                diagnostics.append(
+                    f"Stream found but account_type='{stream_any_type.m3u_account.account_type}' (need 'XC')"
+                )
+                if not stream_any_type.channels.exists():
+                    diagnostics.append("Stream has no channels assigned")
+
+            # Check total XC streams count (is anything synced?)
+            xc_stream_count = Stream.objects.filter(m3u_account__account_type='XC').count()
+            diagnostics.append(f"Total XC streams in DB: {xc_stream_count}")
+
+            # Check if internal ID exists but user lacks access
+            if channel_id_str.isdigit():
+                ch = Channel.objects.filter(id=int(channel_id_str)).first()
+                if ch:
+                    diagnostics.append(
+                        f"Channel exists (id={ch.id}, name='{ch.name}') "
+                        f"but user_level mismatch (user={user.user_level}, required={ch.user_level})"
+                    )
+
+            # Log with diagnostics
+            logger.warning(
+                f"[Timeshift] Live: Channel not found for ID={channel_id_str}. "
+                f"User: {username}. "
+                f"Diagnostics: {'; '.join(diagnostics) if diagnostics else 'No matching records'}"
+            )
             return JsonResponse({"error": "Not found"}, status=404)
 
         # Check user access level
