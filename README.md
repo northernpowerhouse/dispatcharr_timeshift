@@ -10,20 +10,32 @@ Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 da
 
 ## ⚠️ IMPORTANT: Installation from GitHub
 
-When downloading this plugin from GitHub (via "Download ZIP"), the folder will be named `dispatcharr_timeshift-main` (GitHub adds `-main` suffix for the main branch).
+When downloading this plugin from GitHub (via "Download ZIP"), the file will be named `dispatcharr_timeshift-main.zip` (GitHub adds `-main` suffix for the main branch).
 
-**You MUST rename it to `dispatcharr_timeshift`** for the plugin to load correctly:
+### Recommended Method: WebUI Import
+
+1. **Rename the ZIP file** from `dispatcharr_timeshift-main.zip` to `dispatcharr_timeshift.zip`
+2. Go to Dispatcharr **Settings → Plugins**
+3. Click **Import** and select your renamed ZIP file
+4. **Enable** the plugin after import
+
+The WebUI import handles file permissions automatically.
+
+### Manual Method (Advanced)
+
+If you extract files directly to the plugins directory, you **MUST** manage file permissions yourself:
 
 ```bash
-# After extracting the ZIP to your plugins directory:
 cd /path/to/dispatcharr/data/plugins/
 mv dispatcharr_timeshift-main dispatcharr_timeshift
-
-# Then restart Dispatcharr
+chmod 644 dispatcharr_timeshift/*.py
+chown 1000:1000 dispatcharr_timeshift/*
 docker compose restart dispatcharr
 ```
 
-If you don't rename the folder, the plugin **will not load** and timeshift features won't be available.
+### Timeshift Not Working?
+
+If timeshift features don't appear after installation, your **provider may not support timeshift** (tv_archive). Check if your Xtream Codes provider offers catch-up/replay functionality.
 
 ---
 
