@@ -42,13 +42,13 @@ If timeshift features don't appear after installation, your **provider may not s
 ## Changelog
 
 ### v1.1.2
-- **Code cleanup**: Commented out dead code (unused `uninstall_hooks()` and `_restore_*()` functions)
+- **Code cleanup**: Removed dead code (`uninstall_hooks()` and `_restore_*()` functions)
   - Dispatcharr never calls `plugin.run("disable")`, so these functions were never executed
-  - Code is commented with `[DISABLED v1.1.2]` tags for easy restoration if needed
 - **Optimized diagnostics**: Expensive DB queries in 404 handler now only run in DEBUG mode
   - Reduces overhead on production systems
   - Basic warning still logged at INFO level
 - **Minor fix**: Removed unnecessary `if chunk:` check in stream generator
+- **Tested with Dispatcharr v0.14.0**
 
 ### v1.1.1
 - **Dynamic EPG-based duration**: Timeshift requests now use the actual programme duration from EPG

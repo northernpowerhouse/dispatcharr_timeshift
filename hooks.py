@@ -126,21 +126,6 @@ def install_hooks():
         return False
 
 
-# [DISABLED v1.1.2] Raison: Dispatcharr ne call jamais plugin.run("disable")
-# Pour réactiver: décommenter ce bloc et les 5 fonctions _restore_*() ci-dessous
-# def uninstall_hooks():
-#     """
-#     Restore all original functions.
-#     """
-#     logger.info("[Timeshift] Uninstalling hooks...")
-#     _restore_xc_get_live_streams()
-#     _restore_stream_xc()
-#     _restore_xc_get_epg()
-#     _restore_generate_epg()
-#     _restore_url_resolver()
-#     logger.info("[Timeshift] All hooks uninstalled")
-
-
 def _patch_xc_get_live_streams():
     """
     Patch xc_get_live_streams to:
@@ -211,18 +196,6 @@ def _patch_xc_get_live_streams():
 
     output_views.xc_get_live_streams = patched_xc_get_live_streams
     logger.info("[Timeshift] Patched xc_get_live_streams")
-
-
-# [DISABLED v1.1.2] Voir uninstall_hooks() ci-dessus
-# def _restore_xc_get_live_streams():
-#     """Restore original xc_get_live_streams function."""
-#     global _original_xc_get_live_streams
-#
-#     if _original_xc_get_live_streams:
-#         from apps.output import views as output_views
-#         output_views.xc_get_live_streams = _original_xc_get_live_streams
-#         _original_xc_get_live_streams = None
-#         logger.info("[Timeshift] Restored xc_get_live_streams")
 
 
 def _patch_stream_xc():
@@ -374,29 +347,6 @@ def _patch_stream_xc():
             logger.info(f"[Timeshift] Patched URL pattern: {pattern.name}")
 
     logger.info("[Timeshift] Patched stream_xc for provider stream_id lookup")
-
-
-# [DISABLED v1.1.2] Voir uninstall_hooks() ci-dessus
-# def _restore_stream_xc():
-#     """Restore original stream_xc function and URL pattern callbacks."""
-#     global _original_stream_xc, _original_url_callbacks
-#
-#     if _original_stream_xc:
-#         from apps.proxy.ts_proxy import views as proxy_views
-#         from dispatcharr import urls as main_urls
-#
-#         # Restore module function
-#         proxy_views.stream_xc = _original_stream_xc
-#
-#         # Restore URL pattern callbacks
-#         for pattern in main_urls.urlpatterns:
-#             if id(pattern) in _original_url_callbacks:
-#                 pattern.callback = _original_url_callbacks[id(pattern)]
-#                 logger.info(f"[Timeshift] Restored URL pattern: {pattern.name}")
-#
-#         _original_url_callbacks = {}
-#         _original_stream_xc = None
-#         logger.info("[Timeshift] Restored stream_xc")
 
 
 def _patch_xc_get_epg():
@@ -577,18 +527,6 @@ def _patch_xc_get_epg():
     logger.info("[Timeshift] Patched xc_get_epg for provider stream_id lookup")
 
 
-# [DISABLED v1.1.2] Voir uninstall_hooks() ci-dessus
-# def _restore_xc_get_epg():
-#     """Restore original xc_get_epg function."""
-#     global _original_xc_get_epg
-#
-#     if _original_xc_get_epg:
-#         from apps.output import views as output_views
-#         output_views.xc_get_epg = _original_xc_get_epg
-#         _original_xc_get_epg = None
-#         logger.info("[Timeshift] Restored xc_get_epg")
-
-
 def _patch_generate_epg():
     """
     Patch generate_epg to convert XMLTV timestamps to local timezone.
@@ -674,18 +612,6 @@ def _patch_generate_epg():
     logger.info("[Timeshift] Patched generate_epg for XMLTV timezone conversion")
 
 
-# [DISABLED v1.1.2] Voir uninstall_hooks() ci-dessus
-# def _restore_generate_epg():
-#     """Restore original generate_epg function."""
-#     global _original_generate_epg
-#
-#     if _original_generate_epg:
-#         from apps.output import views as output_views
-#         output_views.generate_epg = _original_generate_epg
-#         _original_generate_epg = None
-#         logger.info("[Timeshift] Restored generate_epg")
-
-
 def _patch_url_resolver():
     """
     Patch URLResolver.resolve to intercept /timeshift/ URLs.
@@ -740,15 +666,3 @@ def _patch_url_resolver():
 
     URLResolver.resolve = patched_resolve
     logger.info("[Timeshift] Patched URLResolver.resolve")
-
-
-# [DISABLED v1.1.2] Voir uninstall_hooks() ci-dessus
-# def _restore_url_resolver():
-#     """Restore original URLResolver.resolve function."""
-#     global _original_resolve
-#
-#     if _original_resolve is not None:
-#         from django.urls.resolvers import URLResolver
-#         URLResolver.resolve = _original_resolve
-#         _original_resolve = None
-#         logger.info("[Timeshift] Restored URLResolver.resolve")

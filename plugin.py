@@ -130,9 +130,9 @@ class Plugin:
             return {"status": "error", "message": "Failed to install hooks"}
 
         elif action == "disable":
-            # [DISABLED v1.1.2] Dispatcharr ne call jamais run("disable")
-            # Il toggle juste le flag 'enabled' en DB. Hooks check enabled state at runtime.
-            logger.info("[Timeshift] Plugin disabled (hooks remain installed, check enabled at runtime)")
+            # Note: Dispatcharr only toggles the 'enabled' flag in DB, it doesn't call this.
+            # Hooks remain installed and check enabled state at runtime.
+            logger.info("[Timeshift] Plugin disabled (hooks check enabled state at runtime)")
             return {"status": "ok", "message": "Timeshift plugin disabled"}
 
         return {"status": "error", "message": f"Unknown action: {action}"}
