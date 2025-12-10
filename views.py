@@ -167,11 +167,13 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
     if not m3u_account or m3u_account.account_type != 'XC':
         return HttpResponseBadRequest("Channel not from Xtream Codes provider")
 
-    # Step 6: Convert timestamp from UTC to provider's local timezone
-    # iPlayTV sends timestamps in UTC, but provider expects local time
+    # Step 6: Timestamp is already in provider's local timezone
+    # Our patched EPG (hooks.py) sends timestamps to clients in local time,
+    # so iPlayTV sends them back to us in the same local timezone.
+    # NO CONVERSION NEEDED - pass directly to provider.
     timezone_str = _get_plugin_timezone()
-    local_timestamp = _convert_timestamp_to_local(timestamp, timezone_str)
-    logger.info(f"[Timeshift] Converted timestamp: {timestamp} (UTC) -> {local_timestamp} ({timezone_str})")
+    local_timestamp = timestamp  # Already in local time from our EPG
+    logger.info(f"[Timeshift] Using timestamp as-is (already local): {local_timestamp} ({timezone_str})")
 
     # Step 6.5: Get programme duration from EPG
     # Duration is dynamic based on the actual programme length

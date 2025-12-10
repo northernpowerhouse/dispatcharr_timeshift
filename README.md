@@ -2,7 +2,7 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.1.3
+**Version**: 1.1.4
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
@@ -40,6 +40,14 @@ If timeshift features don't appear after installation, your **provider may not s
 ---
 
 ## Changelog
+
+### v1.1.4
+- **Bug fix**: Removed double timezone conversion causing wrong timeshift playback
+  - The EPG patch (hooks.py) already sends timestamps to clients in LOCAL time
+  - When iPlayTV sends a timeshift request, the timestamp is already in local time
+  - Previously, views.py was converting it again from "UTC" to local, causing double conversion
+  - Now the timestamp is passed as-is to the provider (no conversion needed)
+  - This fixes timeshift playing wrong content due to incorrect time offset
 
 ### v1.1.3
 - **Bug fix**: Timezone setting was not being read from database
