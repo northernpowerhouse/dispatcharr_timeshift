@@ -18,9 +18,11 @@ URL FORMAT FROM iPlayTV:
 
 TIMESTAMP HANDLING:
     The timestamp (e.g., "2025-01-15:14-30") is converted from UTC to the
-    provider's local timezone before being sent. iPlayTV sends UTC timestamps
-    from EPG data, but XC providers expect local time. The timezone is
-    configurable in plugin settings (defaults to Europe/Brussels).
+    provider's local timezone before being sent. IPTV clients (iPlayTV, TiviMate,
+    Televizo) use the start_timestamp field from EPG (which is UTC unix timestamp)
+    to construct timeshift URLs. XC providers expect local time, so we convert
+    UTC -> Local. The timezone is configurable in plugin settings (defaults to
+    Europe/Brussels).
 
 AUTHENTICATION:
     Uses Dispatcharr's xc_password (stored in user.custom_properties),
@@ -167,13 +169,14 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
     if not m3u_account or m3u_account.account_type != 'XC':
         return HttpResponseBadRequest("Channel not from Xtream Codes provider")
 
-    # Step 6: Timestamp is already in provider's local timezone
-    # Our patched EPG (hooks.py) sends timestamps to clients in local time,
-    # so iPlayTV sends them back to us in the same local timezone.
-    # NO CONVERSION NEEDED - pass directly to provider.
+    # Step 6: Convert timestamp from UTC to provider's local timezone
+    # IPTV clients (iPlayTV, TiviMate, Televizo) use start_timestamp (UTC unix)
+    # from the EPG response to construct timeshift URLs. The timestamp in the URL
+    # is therefore in UTC format. XC providers expect LOCAL time for timeshift,
+    # so we must convert UTC -> Local before sending to provider.
     timezone_str = _get_plugin_timezone()
-    local_timestamp = timestamp  # Already in local time from our EPG
-    logger.info(f"[Timeshift] Using timestamp as-is (already local): {local_timestamp} ({timezone_str})")
+    local_timestamp = _convert_timestamp_to_local(timestamp, timezone_str)
+    logger.info(f"[Timeshift] Converted timestamp: {timestamp} (UTC) -> {local_timestamp} ({timezone_str})")
 
     # Step 6.5: Get programme duration from EPG
     # Duration is dynamic based on the actual programme length

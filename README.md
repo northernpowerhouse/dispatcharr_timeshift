@@ -2,7 +2,7 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.1.4
+**Version**: 1.1.5
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
@@ -41,13 +41,19 @@ If timeshift features don't appear after installation, your **provider may not s
 
 ## Changelog
 
-### v1.1.4
-- **Bug fix**: Removed double timezone conversion causing wrong timeshift playback
-  - The EPG patch (hooks.py) already sends timestamps to clients in LOCAL time
-  - When iPlayTV sends a timeshift request, the timestamp is already in local time
-  - Previously, views.py was converting it again from "UTC" to local, causing double conversion
-  - Now the timestamp is passed as-is to the provider (no conversion needed)
-  - This fixes timeshift playing wrong content due to incorrect time offset
+### v1.1.5
+- **Bug fix**: Re-enabled UTC→Local timezone conversion for timeshift timestamps
+  - v1.1.4 incorrectly removed the conversion, causing wrong content to play
+  - Root cause: IPTV clients (iPlayTV, TiviMate, Televizo) use `start_timestamp` (UTC unix timestamp) from EPG to construct timeshift URLs
+  - The timestamp in the URL is therefore in UTC, but XC providers expect LOCAL time
+  - Now views.py correctly converts the timestamp from UTC to the configured timezone
+  - Example: User selects 18:00 Toronto show → Client sends 23:00 UTC → Plugin converts to 18:00 local → Provider plays correct content
+
+### v1.1.4 (BROKEN - DO NOT USE)
+- ~~Bug fix: Removed double timezone conversion~~ - This was incorrect
+  - This version broke timeshift for all non-UTC timezones
+  - Users experienced wrong content playing (offset by their timezone difference)
+  - Fixed in v1.1.5
 
 ### v1.1.3
 - **Bug fix**: Timezone setting was not being read from database
