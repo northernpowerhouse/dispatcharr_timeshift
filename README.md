@@ -2,7 +2,7 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.1.5
+**Version**: 1.1.6
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
@@ -40,6 +40,25 @@ If timeshift features don't appear after installation, your **provider may not s
 ---
 
 ## Changelog
+
+### v1.1.6
+- **New feature: Debug Mode** - Toggle in plugin settings to enable ultra-verbose logging
+  - Normal mode: Minimal logging (1 line per timeshift request + errors only)
+  - Debug mode: Detailed logs for every step (config loading, channel lookup, timestamp conversion, URL building, provider response)
+- **New feature: URL Format Selection** - Choose between timeshift URL formats:
+  - Auto-detect (default): Tries Format A, falls back to Format B if 400 error
+  - Format A: Query string (`/streaming/timeshift.php?username=X&...`)
+  - Format B: Path-based (`/timeshift/user/pass/duration/time/id.ts`)
+  - Custom: User-defined template with placeholders
+- **New feature: Custom URL Template** - For exotic providers with non-standard URLs
+  - Placeholders: `{server_url}`, `{username}`, `{password}`, `{stream_id}`, `{timestamp}`, `{duration}`
+  - Only used when "Custom template" is selected in URL Format
+- **New feature: Timezone Dropdown** - Provider timezone now uses a dropdown with 120 IANA timezone options
+  - Organized by region: UTC, Europe, Americas, Asia, Africa, Australia/Pacific
+  - Prevents typos and invalid timezone entries
+- **Code cleanup**: Added `.strip()` to all config values to prevent whitespace issues
+- **Reduced log noise**: Production logs now minimal, detailed info only in debug mode
+- **Bug fix**: XMLTV EPG compatibility with Dispatcharr v0.14 (handles both HttpResponse and StreamingHttpResponse)
 
 ### v1.1.5
 - **Bug fix**: Re-enabled UTC→Local timezone conversion for timeshift timestamps
@@ -244,6 +263,36 @@ Provider: /streaming/timeshift.php?stream=22371&start=2025-01-15:14-30&duration=
 |---------|---------|-------------|
 | Provider Timezone | Europe/Brussels | Timezone for timestamp conversion (IANA format) |
 | EPG Language | en | Language code for EPG data (27 European languages available) |
+| Debug Mode | Off | Enable ultra-verbose logging for troubleshooting |
+| Catchup URL Format | Auto-detect | URL format for timeshift requests (see below) |
+| Custom URL Template | (empty) | Custom URL with placeholders (only when "Custom" format selected) |
+
+### URL Format Options
+
+| Format | URL Pattern | When to Use |
+|--------|-------------|-------------|
+| **Auto-detect** (default) | Tries A, falls back to B | Most providers - works automatically |
+| **Format A** | `/streaming/timeshift.php?username=X&password=Y&stream=Z&start=T&duration=N` | Standard XC providers |
+| **Format B** | `/timeshift/{user}/{pass}/{duration}/{timestamp}/{stream_id}.ts` | Some providers require this format |
+| **Custom** | User-defined template | Exotic providers with non-standard URLs |
+
+### Custom URL Template Placeholders
+
+If your provider uses a non-standard URL format, select "Custom template" and use these placeholders:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{server_url}` | Provider's server URL (without trailing slash) |
+| `{username}` | M3U account username |
+| `{password}` | M3U account password |
+| `{stream_id}` | Provider's stream ID |
+| `{timestamp}` | Programme start time (YYYY-MM-DD:HH-MM format, local timezone) |
+| `{duration}` | Programme duration in minutes |
+
+Example custom template:
+```
+{server_url}/catchup/{username}/{password}/{stream_id}/{timestamp}/{duration}.m3u8
+```
 
 ### Timezone Setting
 
@@ -432,11 +481,19 @@ docker compose logs dispatcharr | grep "Timeshift.*Auth"          # Authenticati
 docker compose logs dispatcharr | grep "Timeshift.*Provider"      # Provider communication errors
 ```
 
-**Log levels:**
-- `INFO`: Normal operations (requests received, channels enhanced, streams started)
-- `WARNING`: Non-fatal issues (auth failed, channel not found with fallback)
-- `ERROR`: Failures requiring attention (provider errors, unexpected exceptions)
-- `DEBUG`: Detailed flow (timestamp conversions, search details) - enable Django DEBUG mode to see these
+**Log levels (Normal mode):**
+- `INFO`: One line per timeshift request (`[Timeshift] TF1 @ 2025-01-15:14-30`)
+- `ERROR`: Failures requiring attention (auth failed, channel not found, provider errors)
+
+**Log levels (Debug mode - enable in plugin settings):**
+- All of the above, plus:
+- Detailed config loading
+- Channel search steps (provider_stream_id lookup, internal_id fallback)
+- Stream properties and tv_archive status
+- Timestamp conversion details (UTC → Local)
+- URL format selection and built URL
+- Request headers and provider response status
+- Each step is logged with `=== REQUEST START ===` and `=== REQUEST END ===` markers
 
 ## Limitations
 

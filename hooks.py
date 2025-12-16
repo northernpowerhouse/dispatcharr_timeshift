@@ -67,23 +67,39 @@ def _get_plugin_config():
     """
     Get plugin configuration from database.
 
-    Returns timezone and language settings configured in plugin UI.
+    Returns all plugin settings configured in plugin UI.
     Used by multiple hooks to avoid duplicating config loading code.
 
     Returns:
-        dict: {'timezone': str, 'language': str}
+        dict: {
+            'timezone': str,
+            'language': str,
+            'debug_mode': bool,
+            'url_format': str ('auto', 'format_a', 'format_b', 'custom'),
+            'custom_url_template': str
+        }
     """
+    defaults = {
+        'timezone': 'Europe/Brussels',
+        'language': 'en',
+        'debug_mode': False,
+        'url_format': 'auto',
+        'custom_url_template': ''
+    }
     try:
         from apps.plugins.models import PluginConfig
         config = PluginConfig.objects.filter(key='dispatcharr_timeshift').first()
         if config and config.settings:
             return {
-                'timezone': config.settings.get('timezone', 'Europe/Brussels'),
-                'language': config.settings.get('language', 'en')
+                'timezone': config.settings.get('timezone', 'Europe/Brussels').strip(),
+                'language': config.settings.get('language', 'en').strip(),
+                'debug_mode': bool(config.settings.get('debug_mode', False)),
+                'url_format': config.settings.get('url_format', 'auto').strip(),
+                'custom_url_template': config.settings.get('custom_url_template', '').strip()
             }
     except Exception:
         pass
-    return {'timezone': 'Europe/Brussels', 'language': 'en'}
+    return defaults
 
 
 def _is_plugin_enabled():
@@ -154,20 +170,27 @@ def _patch_xc_get_live_streams():
 
         from apps.channels.models import Channel
 
+        config = _get_plugin_config()
+        debug = config['debug_mode']
+
+        if debug:
+            logger.info(f"[Timeshift] API: Processing {len(streams)} streams for timeshift enhancement")
+
         timeshift_count = 0
-        total_streams = len(streams)
 
         for stream_data in streams:
             original_stream_id = stream_data.get('stream_id')
             try:
                 channel = Channel.objects.filter(id=original_stream_id).first()
                 if not channel:
-                    logger.debug(f"[Timeshift] API: Channel not found for internal_id={original_stream_id}")
+                    if debug:
+                        logger.info(f"[Timeshift] API: Channel not found for internal_id={original_stream_id}")
                     continue
 
                 first_stream = channel.streams.order_by('channelstream__order').first()
                 if not first_stream:
-                    logger.debug(f"[Timeshift] API: No streams for channel '{channel.name}' (id={original_stream_id})")
+                    if debug:
+                        logger.info(f"[Timeshift] API: No streams for channel '{channel.name}' (id={original_stream_id})")
                     continue
 
                 props = first_stream.custom_properties or {}
@@ -179,18 +202,22 @@ def _patch_xc_get_live_streams():
 
                 if tv_archive:
                     timeshift_count += 1
+                    if debug:
+                        logger.info(f"[Timeshift] API: {channel.name} → tv_archive=1, duration={stream_data['tv_archive_duration']}d")
 
                 # Replace stream_id with provider's stream_id
                 # This is needed for iPlayTV to construct correct timeshift URLs
                 provider_stream_id = props.get('stream_id')
                 if provider_stream_id:
+                    if debug:
+                        logger.info(f"[Timeshift] API: {channel.name} → stream_id {original_stream_id} → {provider_stream_id}")
                     stream_data['stream_id'] = int(provider_stream_id)
 
             except Exception as e:
-                logger.warning(f"[Timeshift] API: Error enhancing stream internal_id={original_stream_id}: {e}")
+                logger.error(f"[Timeshift] API: Error enhancing stream internal_id={original_stream_id}: {e}")
 
-        if timeshift_count > 0:
-            logger.info(f"[Timeshift] API: Enhanced {timeshift_count}/{total_streams} channels with timeshift support")
+        if debug and timeshift_count > 0:
+            logger.info(f"[Timeshift] API: Enhanced {timeshift_count}/{len(streams)} channels with timeshift")
 
         return streams
 
@@ -235,17 +262,27 @@ def _patch_stream_xc():
         from apps.accounts.models import User
         from apps.channels.models import Channel, Stream
 
+        config = _get_plugin_config()
+        debug = config['debug_mode']
+
         user = get_object_or_404(User, username=username)
 
         # Extract channel ID without extension (e.g., "12345.ts" -> "12345")
         channel_id_str = pathlib.Path(channel_id).stem
 
+        if debug:
+            logger.info(f"[Timeshift] Live: Request user={username}, channel_id={channel_id_str}")
+
         custom_properties = user.custom_properties or {}
 
         if "xc_password" not in custom_properties:
+            if debug:
+                logger.info(f"[Timeshift] Live: Auth failed - no xc_password for user {username}")
             return JsonResponse({"error": "Invalid credentials"}, status=401)
 
         if custom_properties["xc_password"] != password:
+            if debug:
+                logger.info(f"[Timeshift] Live: Auth failed - wrong password for user {username}")
             return JsonResponse({"error": "Invalid credentials"}, status=401)
 
         channel = None
@@ -258,11 +295,13 @@ def _patch_stream_xc():
         ).first()
         if stream:
             channel = stream.channels.first()
-            if channel:
-                logger.info(f"[Timeshift] Live: Found channel by provider stream_id={channel_id_str}: {channel.name}")
+            if channel and debug:
+                logger.info(f"[Timeshift] Live: Found by provider_stream_id={channel_id_str} → {channel.name}")
 
         # Fall back to original behavior (internal ID lookup)
         if not channel:
+            if debug:
+                logger.info(f"[Timeshift] Live: Not found by provider_stream_id, trying internal_id")
             try:
                 internal_id = int(channel_id_str)
                 if user.user_level < 10:
@@ -284,15 +323,18 @@ def _patch_stream_xc():
                         channel = Channel.objects.filter(**filters).distinct().first()
                 else:
                     channel = Channel.objects.filter(id=internal_id).first()
+
+                if channel and debug:
+                    logger.info(f"[Timeshift] Live: Found by internal_id={internal_id} → {channel.name}")
             except (ValueError, TypeError):
                 pass
 
         if not channel:
-            # Basic warning (always logged)
-            logger.warning(f"[Timeshift] Live: Channel not found for ID={channel_id_str}. User: {username}")
+            # Error always logged
+            logger.error(f"[Timeshift] Live: Channel not found for ID={channel_id_str}")
 
-            # Detailed diagnostics only in DEBUG mode (expensive DB queries)
-            if logger.isEnabledFor(logging.DEBUG):
+            # Detailed diagnostics only in debug mode (expensive DB queries)
+            if debug:
                 diagnostics = []
 
                 # Check if stream exists with this ID but wrong account type
@@ -320,12 +362,14 @@ def _patch_stream_xc():
                         )
 
                 if diagnostics:
-                    logger.debug(f"[Timeshift] Diagnostics: {'; '.join(diagnostics)}")
+                    logger.info(f"[Timeshift] Live: Diagnostics: {'; '.join(diagnostics)}")
 
             return JsonResponse({"error": "Not found"}, status=404)
 
         # Check user access level
         if user.user_level < channel.user_level:
+            if debug:
+                logger.info(f"[Timeshift] Live: Access denied - user_level {user.user_level} < required {channel.user_level}")
             return JsonResponse({"error": "Not found"}, status=404)
 
         # Call the original stream_ts function
@@ -385,12 +429,17 @@ def _patch_xc_get_epg():
         from django.http import Http404
         from apps.channels.models import Channel, Stream
 
+        config = _get_plugin_config()
+        debug = config['debug_mode']
+
         channel_id = request.GET.get('stream_id')
         if not channel_id:
-            logger.warning("[Timeshift] EPG: Request missing stream_id parameter")
+            logger.error("[Timeshift] EPG: Request missing stream_id parameter")
             raise Http404()
 
-        logger.debug(f"[Timeshift] EPG: Request for stream_id={channel_id}, short={short}")
+        if debug:
+            logger.info(f"[Timeshift] EPG: Request stream_id={channel_id}, short={short}")
+
         channel = None
 
         try:
@@ -402,11 +451,13 @@ def _patch_xc_get_epg():
             ).first()
             if stream:
                 channel = stream.channels.first()
-                if channel:
-                    logger.info(f"[Timeshift] EPG: Found channel by provider stream_id={channel_id}: {channel.name}")
+                if channel and debug:
+                    logger.info(f"[Timeshift] EPG: Found by provider_stream_id={channel_id} → {channel.name}")
 
             # Fall back to original behavior (internal ID lookup)
             if not channel:
+                if debug:
+                    logger.info(f"[Timeshift] EPG: Not found by provider_stream_id, trying internal_id")
                 if user.user_level < 10:
                     user_profile_count = user.channel_profiles.count()
 
@@ -426,16 +477,20 @@ def _patch_xc_get_epg():
                 else:
                     channel = Channel.objects.filter(id=channel_id).first()
 
+                if channel and debug:
+                    logger.info(f"[Timeshift] EPG: Found by internal_id={channel_id} → {channel.name}")
+
             if not channel:
-                logger.warning(f"[Timeshift] EPG: Channel not found for stream_id={channel_id}. "
-                              f"Checked: provider_stream_id lookup, internal_id lookup. "
-                              f"Check: Is stream synced? Is M3U account type 'XC'?")
+                logger.error(f"[Timeshift] EPG: Channel not found for stream_id={channel_id}")
                 raise Http404()
 
             # Check if channel has tv_archive enabled
             first_stream = channel.streams.order_by('channelstream__order').first()
             props = first_stream.custom_properties or {} if first_stream else {}
             has_tv_archive = props.get('tv_archive') in (1, '1')
+
+            if debug:
+                logger.info(f"[Timeshift] EPG: {channel.name} tv_archive={has_tv_archive}, props={props}")
 
             if has_tv_archive and not short:
                 # CUSTOM EPG RESPONSE: Include past programs for timeshift
@@ -445,13 +500,15 @@ def _patch_xc_get_epg():
                 import base64
 
                 # Get plugin config
-                plugin_config = _get_plugin_config()
-                timezone_str = plugin_config['timezone']
-                language = plugin_config['language']
+                timezone_str = config['timezone']
+                language = config['language']
                 local_tz = ZoneInfo(timezone_str)
 
                 archive_duration_days = int(props.get('tv_archive_duration', 7))
                 start_date = django_timezone.now() - timedelta(days=archive_duration_days)
+
+                if debug:
+                    logger.info(f"[Timeshift] EPG: Generating custom EPG for {channel.name}, archive={archive_duration_days}d, tz={timezone_str}")
 
                 # Get programs from the last X days until future
                 programs = channel.epg_data.programs.filter(
@@ -460,6 +517,7 @@ def _patch_xc_get_epg():
 
                 output = {"epg_listings": []}
                 now = django_timezone.now()
+                archive_count = 0
 
                 for program in programs:
                     start = program.start_time
@@ -495,14 +553,19 @@ def _patch_xc_get_epg():
                         days_ago = (now - end).days
                         if days_ago <= archive_duration_days:
                             program_output["has_archive"] = 1  # INTEGER
-                            logger.debug(f"[Timeshift] EPG: has_archive=1 for '{title}' ({days_ago} days ago)")
+                            archive_count += 1
 
                     output['epg_listings'].append(program_output)
 
-                logger.info(f"[Timeshift] EPG: Generated {len(output['epg_listings'])} programs for {channel.name} (past {archive_duration_days} days)")
+                if debug:
+                    logger.info(f"[Timeshift] EPG: Generated {len(output['epg_listings'])} programs ({archive_count} with archive) for {channel.name}")
+
                 return output
             else:
                 # No timeshift or short=True - need to call original with correct channel ID
+                if debug:
+                    logger.info(f"[Timeshift] EPG: Delegating to original (tv_archive={has_tv_archive}, short={short})")
+
                 from django.http import QueryDict
                 original_get = request.GET
 
@@ -558,17 +621,28 @@ def _patch_generate_epg():
             # Get timezone from plugin settings
             plugin_config = _get_plugin_config()
             timezone_str = plugin_config['timezone']
+            debug = plugin_config['debug_mode']
             local_tz = ZoneInfo(timezone_str)
-            logger.info(f"[Timeshift] XMLTV: Converting timestamps to {timezone_str}")
 
-            # Call original function to get StreamingHttpResponse
+            if debug:
+                logger.info(f"[Timeshift] XMLTV: Converting timestamps to {timezone_str}")
+
+            # Call original function to get response
             original_response = _original_generate_epg(request, profile_name, user)
-
-            # Extract the original generator
-            original_generator = original_response.streaming_content
 
             # Pattern to match XMLTV timestamps: 20251128143000 +0000
             timestamp_pattern = re.compile(r'(\d{14}) ([+-]\d{4})')
+
+            # Handle both StreamingHttpResponse and regular HttpResponse
+            if hasattr(original_response, 'streaming_content'):
+                # StreamingHttpResponse - use generator
+                original_generator = original_response.streaming_content
+            else:
+                # Regular HttpResponse - convert content to single-item generator
+                content = original_response.content
+                if isinstance(content, bytes):
+                    content = content.decode('utf-8')
+                original_generator = iter([content])
 
             def timezone_converting_generator():
                 from datetime import datetime
@@ -588,7 +662,8 @@ def _patch_generate_epg():
                                 local_time = utc_time.astimezone(local_tz)
                                 return local_time.strftime("%Y%m%d%H%M%S %z")
                             except Exception as e:
-                                logger.warning(f"[Timeshift] XMLTV: Timestamp conversion failed for '{timestamp_str}': {e}")
+                                if debug:
+                                    logger.info(f"[Timeshift] XMLTV: Timestamp conversion failed for '{timestamp_str}': {e}")
                                 return match.group(0)
 
                         chunk = timestamp_pattern.sub(convert_timestamp, chunk)
@@ -605,7 +680,7 @@ def _patch_generate_epg():
             return response
 
         except Exception as e:
-            logger.error(f"[Timeshift] XMLTV: Generation error, falling back to original: {e}", exc_info=True)
+            logger.error(f"[Timeshift] XMLTV: Generation error, falling back to original: {e}")
             return _original_generate_epg(request, profile_name, user)
 
     output_views.generate_epg = patched_generate_epg
@@ -655,7 +730,9 @@ def _patch_url_resolver():
             match = TIMESHIFT_PATTERN.match(path)
             if match:
                 from django.urls import ResolverMatch
-                logger.debug(f"[Timeshift] Intercepted: {path}")
+                config = _get_plugin_config()
+                if config['debug_mode']:
+                    logger.info(f"[Timeshift] URL intercepted: {path}")
                 return ResolverMatch(
                     timeshift_proxy,
                     (),

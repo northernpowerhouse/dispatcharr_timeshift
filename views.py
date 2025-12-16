@@ -68,7 +68,6 @@ def _get_programme_duration(channel, timestamp_str):
 
         # Check if channel has EPG data
         if not channel.epg_data:
-            logger.debug(f"[Timeshift] No EPG data for channel '{channel.name}', using default {DEFAULT_DURATION}min")
             return DEFAULT_DURATION
 
         # Find programme that contains this timestamp
@@ -79,7 +78,6 @@ def _get_programme_duration(channel, timestamp_str):
         ).first()
 
         if not programme:
-            logger.debug(f"[Timeshift] No programme found at {timestamp_str} for '{channel.name}', using default {DEFAULT_DURATION}min")
             return DEFAULT_DURATION
 
         # Calculate duration from programme
@@ -89,12 +87,9 @@ def _get_programme_duration(channel, timestamp_str):
         # Cap at reasonable maximum (8 hours) to avoid issues
         duration_minutes = min(duration_minutes, 480)
 
-        logger.info(f"[Timeshift] Programme '{programme.title}' ({channel.name}): {duration_minutes}min (incl. {BUFFER_MINUTES}min buffer)")
-
         return duration_minutes
 
-    except Exception as e:
-        logger.warning(f"[Timeshift] Error getting programme duration: {e}, using default {DEFAULT_DURATION}min")
+    except Exception:
         return DEFAULT_DURATION
 
 
@@ -136,12 +131,24 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
     Returns:
         StreamingHttpResponse proxying the video stream from provider
     """
+    from .hooks import _get_plugin_config
+
     # QUIRK: The "duration" param is actually the provider's stream_id
     # See module docstring for explanation of iPlayTV's URL format
     provider_stream_id = duration.rstrip('.ts')
 
-    logger.info(f"[Timeshift] Request: user={username}, provider_stream_id={provider_stream_id}, "
-                f"timestamp={timestamp}, url_stream_id={stream_id}")
+    # Load plugin config
+    config = _get_plugin_config()
+    debug = config['debug_mode']
+    url_format = config['url_format']
+    custom_template = config['custom_url_template']
+    timezone_str = config['timezone']
+
+    if debug:
+        logger.info(f"[Timeshift] === REQUEST START ===")
+        logger.info(f"[Timeshift] User: {username}, Provider stream_id: {provider_stream_id}")
+        logger.info(f"[Timeshift] Timestamp (raw): {timestamp}, URL stream_id: {stream_id}")
+        logger.info(f"[Timeshift] Config: url_format={url_format}, timezone={timezone_str}, debug={debug}")
 
     # Step 1: Authenticate user via xc_password
     user = _authenticate_user(username, password)
@@ -154,15 +161,22 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
     if not channel:
         raise Http404("Channel not found")
 
+    if debug:
+        logger.info(f"[Timeshift] Channel found: {channel.name} (id={channel.id})")
+
     # Step 3: Verify user has access to this channel
     if user.user_level < channel.user_level:
-        logger.warning(f"[Timeshift] Access denied for user {username} to channel {channel.name}")
+        logger.error(f"[Timeshift] Access denied: user {username} (level {user.user_level}) < channel {channel.name} (level {channel.user_level})")
         return HttpResponseForbidden("Access denied")
 
     # Step 4: Verify channel supports timeshift
     props = stream.custom_properties or {}
     if props.get('tv_archive') not in (1, '1'):
+        logger.error(f"[Timeshift] Channel {channel.name} does not support timeshift (tv_archive={props.get('tv_archive')})")
         return HttpResponseBadRequest("Timeshift not supported for this channel")
+
+    if debug:
+        logger.info(f"[Timeshift] Stream props: {props}")
 
     # Step 5: Verify it's an Xtream Codes provider
     m3u_account = stream.m3u_account
@@ -170,42 +184,69 @@ def timeshift_proxy(request, username, password, stream_id, timestamp, duration)
         return HttpResponseBadRequest("Channel not from Xtream Codes provider")
 
     # Step 6: Convert timestamp from UTC to provider's local timezone
-    # IPTV clients (iPlayTV, TiviMate, Televizo) use start_timestamp (UTC unix)
-    # from the EPG response to construct timeshift URLs. The timestamp in the URL
-    # is therefore in UTC format. XC providers expect LOCAL time for timeshift,
-    # so we must convert UTC -> Local before sending to provider.
-    timezone_str = _get_plugin_timezone()
     local_timestamp = _convert_timestamp_to_local(timestamp, timezone_str)
-    logger.info(f"[Timeshift] Converted timestamp: {timestamp} (UTC) -> {local_timestamp} ({timezone_str})")
+    if debug:
+        logger.info(f"[Timeshift] Timestamp: {timestamp} (UTC) → {local_timestamp} ({timezone_str})")
 
     # Step 6.5: Get programme duration from EPG
-    # Duration is dynamic based on the actual programme length
     duration_minutes = _get_programme_duration(channel, local_timestamp)
+    if debug:
+        logger.info(f"[Timeshift] Duration from EPG: {duration_minutes} minutes")
 
-    # Step 7: Build provider's timeshift URL with format auto-detection
-    # Some providers use Format A (query string), others use Format B (path-based)
+    # Step 7: Build provider's timeshift URL based on configured format
     stream_id_value = props.get('stream_id')
+    timeshift_url = None
+    fallback_url = None
 
-    # Check cached format preference for this account
-    preferred_format = _url_format_cache.get(m3u_account.id, 'A')
-
-    if preferred_format == 'B':
-        # Format B proven to work for this account - use directly
-        timeshift_url = _build_timeshift_url_format_b(m3u_account, stream_id_value, local_timestamp, duration_minutes)
-        fallback_url = None
-        logger.info(f"[Timeshift] Using cached Format B for account {m3u_account.id}")
-    else:
-        # Try Format A first, with Format B as fallback
+    if url_format == 'custom' and custom_template:
+        # Custom template
+        timeshift_url = custom_template.format(
+            server_url=m3u_account.server_url.rstrip('/'),
+            username=m3u_account.username,
+            password=m3u_account.password,
+            stream_id=stream_id_value,
+            timestamp=local_timestamp,
+            duration=duration_minutes
+        )
+        if debug:
+            logger.info(f"[Timeshift] Using custom template")
+    elif url_format == 'format_a':
+        # Force Format A only
         timeshift_url = _build_timeshift_url_format_a(m3u_account, stream_id_value, local_timestamp, duration_minutes)
-        fallback_url = _build_timeshift_url_format_b(m3u_account, stream_id_value, local_timestamp, duration_minutes)
+        if debug:
+            logger.info(f"[Timeshift] Using Format A (forced)")
+    elif url_format == 'format_b':
+        # Force Format B only
+        timeshift_url = _build_timeshift_url_format_b(m3u_account, stream_id_value, local_timestamp, duration_minutes)
+        if debug:
+            logger.info(f"[Timeshift] Using Format B (forced)")
+    else:
+        # Auto-detect (default): Try A first, fallback to B
+        preferred_format = _url_format_cache.get(m3u_account.id, 'A')
+        if preferred_format == 'B':
+            timeshift_url = _build_timeshift_url_format_b(m3u_account, stream_id_value, local_timestamp, duration_minutes)
+            if debug:
+                logger.info(f"[Timeshift] Using Format B (cached for account {m3u_account.id})")
+        else:
+            timeshift_url = _build_timeshift_url_format_a(m3u_account, stream_id_value, local_timestamp, duration_minutes)
+            fallback_url = _build_timeshift_url_format_b(m3u_account, stream_id_value, local_timestamp, duration_minutes)
+            if debug:
+                logger.info(f"[Timeshift] Using Format A with B fallback (auto-detect)")
 
-    logger.info(f"[Timeshift] Proxying to provider for channel: {channel.name}")
+    if debug:
+        # Log URL without credentials for security
+        url_safe = timeshift_url.split('?')[0] if '?' in timeshift_url else timeshift_url.rsplit('/', 3)[0] + '/...'
+        logger.info(f"[Timeshift] Built URL: {url_safe}")
+
+    # Minimal log in normal mode - just channel name and timestamp
+    if not debug:
+        logger.info(f"[Timeshift] {channel.name} @ {local_timestamp}")
 
     # Step 8: Get User-Agent from M3U account settings
     user_agent = m3u_account.get_user_agent().user_agent
 
     # Step 9: Proxy the stream (with fallback support)
-    return _proxy_stream(request, timeshift_url, user_agent, fallback_url, m3u_account.id)
+    return _proxy_stream(request, timeshift_url, user_agent, fallback_url, m3u_account.id, debug)
 
 
 def _authenticate_user(username, password):
@@ -225,14 +266,14 @@ def _authenticate_user(username, password):
         user = User.objects.get(username=username)
         xc_password = (user.custom_properties or {}).get('xc_password')
         if not xc_password:
-            logger.warning(f"[Timeshift] Auth failed: user '{username}' has no xc_password configured")
+            logger.error(f"[Timeshift] Auth failed: user '{username}' has no xc_password")
             return None
         if xc_password != password:
-            logger.warning(f"[Timeshift] Auth failed: wrong password for user '{username}'")
+            logger.error(f"[Timeshift] Auth failed: wrong password for user '{username}'")
             return None
         return user
     except User.DoesNotExist:
-        logger.warning(f"[Timeshift] Auth failed: user '{username}' does not exist")
+        logger.error(f"[Timeshift] Auth failed: user '{username}' does not exist")
         return None
 
 
@@ -249,8 +290,6 @@ def _find_channel_by_provider_stream_id(provider_stream_id):
     """
     from apps.channels.models import Stream
 
-    logger.debug(f"[Timeshift] Searching for provider_stream_id={provider_stream_id} in XC streams")
-
     # Search for stream where custom_properties.stream_id matches
     # Only look at XC provider streams
     stream = Stream.objects.filter(
@@ -261,19 +300,16 @@ def _find_channel_by_provider_stream_id(provider_stream_id):
     if stream:
         channel = stream.channels.first()
         if channel:
-            logger.debug(f"[Timeshift] Found channel '{channel.name}' for provider_stream_id={provider_stream_id}")
             return channel, stream
         else:
-            logger.error(f"[Timeshift] Stream found but no channel associated for provider_stream_id={provider_stream_id}")
+            logger.error(f"[Timeshift] Stream found but no channel for provider_stream_id={provider_stream_id}")
     else:
-        logger.error(f"[Timeshift] Channel not found: provider_stream_id={provider_stream_id}. "
-                    f"Check: Is stream synced? Is M3U account type 'XC'? "
-                    f"Does stream.custom_properties.stream_id exist?")
+        logger.error(f"[Timeshift] Channel not found: provider_stream_id={provider_stream_id}")
 
     return None, None
 
 
-def _proxy_stream(request, url, user_agent, fallback_url=None, m3u_account_id=None):
+def _proxy_stream(request, url, user_agent, fallback_url=None, m3u_account_id=None, debug=False):
     """
     Proxy video stream from provider to client with fallback support.
 
@@ -289,14 +325,11 @@ def _proxy_stream(request, url, user_agent, fallback_url=None, m3u_account_id=No
         user_agent: User-Agent string from M3U account settings
         fallback_url: Alternative URL format to try if primary returns 400
         m3u_account_id: M3U account ID for caching format preference
+        debug: Enable verbose logging
 
     Returns:
         StreamingHttpResponse with video content (status 200 or 206)
     """
-    # Log URL without credentials for security
-    url_base = url.split('?')[0]
-    logger.info(f"[Timeshift] Proxying to provider: {url_base}")
-
     headers = {
         'User-Agent': user_agent
     }
@@ -306,25 +339,34 @@ def _proxy_stream(request, url, user_agent, fallback_url=None, m3u_account_id=No
     range_header = request.META.get('HTTP_RANGE')
     if range_header:
         headers['Range'] = range_header
-        logger.debug(f"[Timeshift] Forwarding Range header: {range_header}")
+        if debug:
+            logger.info(f"[Timeshift] Forwarding Range header: {range_header}")
+
+    if debug:
+        logger.info(f"[Timeshift] Request headers: {headers}")
 
     try:
         response = requests.get(url, headers=headers, stream=True, timeout=10)
 
+        if debug:
+            logger.info(f"[Timeshift] Provider response: status={response.status_code}")
+
         # If 400 error and we have a fallback URL, try the alternative format
         if response.status_code == 400 and fallback_url:
-            logger.info(f"[Timeshift] Format A returned 400, trying Format B...")
+            if debug:
+                logger.info(f"[Timeshift] Format A returned 400, trying Format B...")
             response.close()
 
-            fallback_url_base = fallback_url.split('?')[0]
-            logger.info(f"[Timeshift] Proxying to provider (fallback): {fallback_url_base}")
-
             response = requests.get(fallback_url, headers=headers, stream=True, timeout=10)
+
+            if debug:
+                logger.info(f"[Timeshift] Fallback response: status={response.status_code}")
 
             # If fallback works, cache the format preference
             if response.status_code in (200, 206) and m3u_account_id:
                 _url_format_cache[m3u_account_id] = 'B'
-                logger.info(f"[Timeshift] Format B works for account {m3u_account_id}, caching preference")
+                if debug:
+                    logger.info(f"[Timeshift] Format B works, cached for account {m3u_account_id}")
 
         # 200 = full content, 206 = partial content (Range request)
         if response.status_code not in (200, 206):
@@ -355,18 +397,21 @@ def _proxy_stream(request, url, user_agent, fallback_url=None, m3u_account_id=No
             if header in response.headers:
                 streaming_response[header] = response.headers[header]
 
-        logger.info(f"[Timeshift] Streaming started (status={response.status_code}, "
-                   f"content-type={response.headers.get('Content-Type', 'unknown')})")
+        if debug:
+            logger.info(f"[Timeshift] Streaming started: status={response.status_code}, "
+                       f"content-type={response.headers.get('Content-Type', 'unknown')}")
+            logger.info(f"[Timeshift] === REQUEST END ===")
+
         return streaming_response
 
     except requests.exceptions.Timeout:
-        logger.error(f"[Timeshift] Provider timeout after 10s for {url_base}")
+        logger.error(f"[Timeshift] Provider timeout after 10s")
         return HttpResponseBadRequest("Provider timeout")
     except requests.exceptions.ConnectionError as e:
-        logger.error(f"[Timeshift] Provider connection error for {url_base}: {e}")
+        logger.error(f"[Timeshift] Provider connection error: {e}")
         return HttpResponseBadRequest("Provider connection error")
     except requests.exceptions.RequestException as e:
-        logger.error(f"[Timeshift] Provider request error for {url_base}: {e}")
+        logger.error(f"[Timeshift] Provider request error: {e}")
         return HttpResponseBadRequest("Provider connection error")
 
 
@@ -408,10 +453,7 @@ def _convert_timestamp_to_local(timestamp, timezone_str):
 
         # Convert to target timezone
         local_time = utc_time.astimezone(ZoneInfo(timezone_str))
-        result = local_time.strftime("%Y-%m-%d:%H-%M")
-
-        logger.debug(f"[Timeshift] Timestamp: {timestamp} (UTC) -> {result} ({timezone_str})")
-        return result
+        return local_time.strftime("%Y-%m-%d:%H-%M")
     except Exception as e:
-        logger.warning(f"[Timeshift] Timestamp conversion failed for '{timestamp}': {e}")
+        logger.error(f"[Timeshift] Timestamp conversion failed for '{timestamp}': {e}")
         return timestamp
