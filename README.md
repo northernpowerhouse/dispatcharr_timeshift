@@ -2,7 +2,7 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.1.6
+**Version**: 1.1.7
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
@@ -40,6 +40,12 @@ If timeshift features don't appear after installation, your **provider may not s
 ---
 
 ## Changelog
+
+### v1.1.7
+- **Bug fix**: Export Plugin class in `__init__.py`
+  - Dispatcharr requires the Plugin class to be exported from `__init__.py`
+  - Without this, the plugin fails with "invalid plugin: missing plugin class"
+  - Added `from .plugin import Plugin` and `__all__ = ['Plugin']`
 
 ### v1.1.6
 - **New feature: Debug Mode** - Toggle in plugin settings to enable ultra-verbose logging
