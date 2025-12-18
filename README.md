@@ -2,32 +2,46 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.0.5
+**Version**: 1.1.8
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
 ---
 
-## ⚠️ IMPORTANT: Installation from GitHub
+## ⚠️ IMPORTANT: Installation Methods
 
-When downloading this plugin from GitHub (via "Download ZIP"), the file will be named `dispatcharr_timeshift-main.zip` (GitHub adds `-main` suffix for the main branch).
+### Method 1: Git Clone (Recommended)
 
-### Recommended Method: WebUI Import
-
-1. **Rename the ZIP file** from `dispatcharr_timeshift-main.zip` to `dispatcharr_timeshift.zip`
-2. Go to Dispatcharr **Settings → Plugins**
-3. Click **Import** and select your renamed ZIP file
-4. **Enable** the plugin after import
-
-The WebUI import handles file permissions automatically.
-
-### Manual Method (Advanced)
-
-If you extract files directly to the plugins directory, you **MUST** manage file permissions yourself:
+The **easiest and most reliable** way to install:
 
 ```bash
 cd /path/to/dispatcharr/data/plugins/
+git clone https://github.com/cedric-marcoux/dispatcharr_timeshift.git
+docker compose restart dispatcharr
+```
+
+Then enable the plugin in Dispatcharr **Settings → Plugins**.
+
+### Method 2: Download Release Asset
+
+Download `dispatcharr_timeshift.zip` from the [Releases page](https://github.com/cedric-marcoux/dispatcharr_timeshift/releases), then import via **Settings → Plugins → Import**.
+
+### Method 3: Manual ZIP (Advanced)
+
+⚠️ **WARNING**: GitHub's default "Download ZIP" includes the branch/tag name in the folder (e.g., `dispatcharr_timeshift-1.1.8/` or `dispatcharr_timeshift-main/`), which **breaks Python imports**. You must rename the folder:
+
+```bash
+cd /path/to/dispatcharr/data/plugins/
+
+# If downloaded from a release tag (v1.1.8):
+unzip dispatcharr_timeshift-1.1.8.zip
+mv dispatcharr_timeshift-1.1.8 dispatcharr_timeshift
+
+# If downloaded from main branch:
+unzip dispatcharr_timeshift-main.zip
 mv dispatcharr_timeshift-main dispatcharr_timeshift
+
+# Fix permissions
 chmod 644 dispatcharr_timeshift/*.py
 chown 1000:1000 dispatcharr_timeshift/*
 docker compose restart dispatcharr
@@ -40,6 +54,85 @@ If timeshift features don't appear after installation, your **provider may not s
 ---
 
 ## Changelog
+
+### v1.1.8
+- **Documentation**: Improved installation instructions
+  - Method 1: Git clone (recommended) - most reliable method
+  - Method 2: Download release asset `dispatcharr_timeshift.zip` (correct folder name)
+  - Method 3: Manual ZIP with folder rename warning
+  - Explained why GitHub's default ZIP breaks Python imports (folder name includes version/branch)
+
+### v1.1.7
+- **Bug fix**: Export Plugin class in `__init__.py`
+  - Dispatcharr requires the Plugin class to be exported from `__init__.py`
+  - Without this, the plugin fails with "invalid plugin: missing plugin class"
+  - Added `from .plugin import Plugin` and `__all__ = ['Plugin']`
+
+### v1.1.6
+- **New feature: Debug Mode** - Toggle in plugin settings to enable ultra-verbose logging
+  - Normal mode: Minimal logging (1 line per timeshift request + errors only)
+  - Debug mode: Detailed logs for every step (config loading, channel lookup, timestamp conversion, URL building, provider response)
+- **New feature: URL Format Selection** - Choose between timeshift URL formats:
+  - Auto-detect (default): Tries Format A, falls back to Format B if 400 error
+  - Format A: Query string (`/streaming/timeshift.php?username=X&...`)
+  - Format B: Path-based (`/timeshift/user/pass/duration/time/id.ts`)
+  - Custom: User-defined template with placeholders
+- **New feature: Custom URL Template** - For exotic providers with non-standard URLs
+  - Placeholders: `{server_url}`, `{username}`, `{password}`, `{stream_id}`, `{timestamp}`, `{duration}`
+  - Only used when "Custom template" is selected in URL Format
+- **New feature: Timezone Dropdown** - Provider timezone now uses a dropdown with 120 IANA timezone options
+  - Organized by region: UTC, Europe, Americas, Asia, Africa, Australia/Pacific
+  - Prevents typos and invalid timezone entries
+- **Code cleanup**: Added `.strip()` to all config values to prevent whitespace issues
+- **Reduced log noise**: Production logs now minimal, detailed info only in debug mode
+- **Bug fix**: XMLTV EPG compatibility with Dispatcharr v0.14 (handles both HttpResponse and StreamingHttpResponse)
+
+### v1.1.5
+- **Bug fix**: Re-enabled UTC→Local timezone conversion for timeshift timestamps
+  - v1.1.4 incorrectly removed the conversion, causing wrong content to play
+  - Root cause: IPTV clients (iPlayTV, TiviMate, Televizo) use `start_timestamp` (UTC unix timestamp) from EPG to construct timeshift URLs
+  - The timestamp in the URL is therefore in UTC, but XC providers expect LOCAL time
+  - Now views.py correctly converts the timestamp from UTC to the configured timezone
+  - Example: User selects 18:00 Toronto show → Client sends 23:00 UTC → Plugin converts to 18:00 local → Provider plays correct content
+
+### v1.1.4 (BROKEN - DO NOT USE)
+- ~~Bug fix: Removed double timezone conversion~~ - This was incorrect
+  - This version broke timeshift for all non-UTC timezones
+  - Users experienced wrong content playing (offset by their timezone difference)
+  - Fixed in v1.1.5
+
+### v1.1.3
+- **Bug fix**: Timezone setting was not being read from database
+  - Plugin was using wrong attribute `config.config` instead of `config.settings`
+  - Timezone always defaulted to "Europe/Brussels" regardless of user setting
+  - Now correctly reads from Dispatcharr's PluginConfig.settings field
+  - Affects both timeshift URL conversion and EPG timestamp conversion
+
+### v1.1.2
+- **Code cleanup**: Removed dead code (`uninstall_hooks()` and `_restore_*()` functions)
+  - Dispatcharr never calls `plugin.run("disable")`, so these functions were never executed
+- **Optimized diagnostics**: Expensive DB queries in 404 handler now only run in DEBUG mode
+  - Reduces overhead on production systems
+  - Basic warning still logged at INFO level
+- **Minor fix**: Removed unnecessary `if chunk:` check in stream generator
+- **Tested with Dispatcharr v0.14.0**
+
+### v1.1.1
+- **Dynamic EPG-based duration**: Timeshift requests now use the actual programme duration from EPG
+  - Calculates duration from programme's `end_time - start_time`
+  - Adds 5-minute buffer for stream startup
+  - Falls back to 120 minutes if programme not found in EPG
+  - Caps at 8 hours maximum to prevent issues
+  - Prevents long movies from being cut off (was hardcoded to 2h)
+  - More efficient for short programmes (30-45 min)
+
+### v1.1.0
+- **URL format fallback**: Automatic detection and fallback for providers using different timeshift URL formats
+  - Format A (default): `/streaming/timeshift.php?username=X&password=Y&stream=Z&start=T&duration=N`
+  - Format B (fallback): `/timeshift/{username}/{password}/N/{timestamp}/{stream_id}.ts`
+  - Automatically tries Format B if Format A returns HTTP 400
+  - Caches working format per M3U account for session (no restart needed)
+  - Fixes "Provider returned 400" error for providers using path-based timeshift URLs
 
 ### v1.0.5
 - **Enhanced diagnostics**: Improved "Channel not found" logging with detailed troubleshooting info
@@ -182,10 +275,11 @@ timeshift_proxy()
     ├── 3. Check user access level
     ├── 4. Verify tv_archive support
     ├── 5. Convert timestamp UTC → Local timezone
-    └── 6. Proxy stream to client
+    ├── 6. Get programme duration from EPG
+    └── 7. Proxy stream to client
     │
     ▼
-Provider: /streaming/timeshift.php?stream=22371&start=2025-01-15:14-30&duration=120
+Provider: /streaming/timeshift.php?stream=22371&start=2025-01-15:14-30&duration={EPG_DURATION}
 ```
 
 ## Configuration
@@ -196,6 +290,36 @@ Provider: /streaming/timeshift.php?stream=22371&start=2025-01-15:14-30&duration=
 |---------|---------|-------------|
 | Provider Timezone | Europe/Brussels | Timezone for timestamp conversion (IANA format) |
 | EPG Language | en | Language code for EPG data (27 European languages available) |
+| Debug Mode | Off | Enable ultra-verbose logging for troubleshooting |
+| Catchup URL Format | Auto-detect | URL format for timeshift requests (see below) |
+| Custom URL Template | (empty) | Custom URL with placeholders (only when "Custom" format selected) |
+
+### URL Format Options
+
+| Format | URL Pattern | When to Use |
+|--------|-------------|-------------|
+| **Auto-detect** (default) | Tries A, falls back to B | Most providers - works automatically |
+| **Format A** | `/streaming/timeshift.php?username=X&password=Y&stream=Z&start=T&duration=N` | Standard XC providers |
+| **Format B** | `/timeshift/{user}/{pass}/{duration}/{timestamp}/{stream_id}.ts` | Some providers require this format |
+| **Custom** | User-defined template | Exotic providers with non-standard URLs |
+
+### Custom URL Template Placeholders
+
+If your provider uses a non-standard URL format, select "Custom template" and use these placeholders:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{server_url}` | Provider's server URL (without trailing slash) |
+| `{username}` | M3U account username |
+| `{password}` | M3U account password |
+| `{stream_id}` | Provider's stream ID |
+| `{timestamp}` | Programme start time (YYYY-MM-DD:HH-MM format, local timezone) |
+| `{duration}` | Programme duration in minutes |
+
+Example custom template:
+```
+{server_url}/catchup/{username}/{password}/{stream_id}/{timestamp}/{duration}.m3u8
+```
 
 ### Timezone Setting
 
@@ -308,6 +432,35 @@ Example scenarios:
 
 **Recommendation**: For channels where you want timeshift, ensure the XC stream with `tv_archive=1` is set as the **first priority** stream.
 
+### Does catchup/timeshift work with Emby Live TV or other M3U-based players?
+
+**No, catchup does not work when using Dispatcharr's M3U output.**
+
+Dispatcharr generates a "clean" M3U without catchup attributes:
+```
+#EXTINF:-1 tvg-id="10" tvg-name="|BE| LA UNE FHD" ...
+http://dispatcharr:9191/proxy/ts/stream/uuid
+```
+
+For M3U-based catchup to work, the following attributes would be required:
+```
+catchup="default"
+catchup-source="http://server/timeshift/user/pass/{stream_id}/{start}/{duration}.ts"
+catchup-days="7"
+```
+
+**The Timeshift plugin only works with:**
+- Xtream Codes API (`player_api.php`) - adds `tv_archive=1` to responses
+- Direct `/timeshift/...` URL interception
+- IPTV clients that use the XC API (iPlayTV, TiviMate in XC mode, Snappier, etc.)
+
+**For M3U-based players like Emby Live TV, your options are:**
+1. Use your provider's original M3U directly (bypass Dispatcharr for catchup)
+2. Connect via Xtream Codes API instead of M3U if the player supports it
+3. Request Dispatcharr to add catchup support in M3U export (feature request on their GitHub)
+
+The Timeshift plugin patches the XC API layer, but Dispatcharr's M3U generator is a separate core component that doesn't include catchup metadata.
+
 ### My programs show 2 hours off in Snappier/IPTVX
 
 Ensure the "Provider Timezone" setting matches your provider's timezone. Most European providers use "Europe/Brussels" or similar. If programs appear 2 hours early or late, adjust the timezone setting accordingly.
@@ -355,17 +508,25 @@ docker compose logs dispatcharr | grep "Timeshift.*Auth"          # Authenticati
 docker compose logs dispatcharr | grep "Timeshift.*Provider"      # Provider communication errors
 ```
 
-**Log levels:**
-- `INFO`: Normal operations (requests received, channels enhanced, streams started)
-- `WARNING`: Non-fatal issues (auth failed, channel not found with fallback)
-- `ERROR`: Failures requiring attention (provider errors, unexpected exceptions)
-- `DEBUG`: Detailed flow (timestamp conversions, search details) - enable Django DEBUG mode to see these
+**Log levels (Normal mode):**
+- `INFO`: One line per timeshift request (`[Timeshift] TF1 @ 2025-01-15:14-30`)
+- `ERROR`: Failures requiring attention (auth failed, channel not found, provider errors)
+
+**Log levels (Debug mode - enable in plugin settings):**
+- All of the above, plus:
+- Detailed config loading
+- Channel search steps (provider_stream_id lookup, internal_id fallback)
+- Stream properties and tv_archive status
+- Timestamp conversion details (UTC → Local)
+- URL format selection and built URL
+- Request headers and provider response status
+- Each step is logged with `=== REQUEST START ===` and `=== REQUEST END ===` markers
 
 ## Limitations
 
 1. **Worker warm-up required**: Each uWSGI worker must handle at least one request to install hooks
-2. **Fixed duration**: Proxy requests 2 hours of content from provider
-3. **XC providers only**: Only works with Xtream Codes type M3U accounts
+2. **XC providers only**: Only works with Xtream Codes type M3U accounts
+3. **EPG required for accurate duration**: Without EPG data, falls back to 120 minutes
 
 ## Development Notes
 
