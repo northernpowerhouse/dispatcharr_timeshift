@@ -2,7 +2,7 @@
 
 Timeshift/catch-up TV plugin for Dispatcharr. Watch past TV programs (up to 7 days) via Xtream Codes providers.
 
-**Version**: 1.1.8
+**Version**: 1.1.9
 **GitHub**: https://github.com/cedric-marcoux/dispatcharr_timeshift
 **License**: MIT
 
@@ -54,6 +54,17 @@ If timeshift features don't appear after installation, your **provider may not s
 ---
 
 ## Changelog
+
+### v1.1.9
+- **New feature: Catch-up Fallback Chain** - Channels with multiple streams now support catch-up even when top-priority stream lacks it
+  - Previously: If top-priority stream (e.g., UHD) had no catch-up, entire channel was marked as unavailable
+  - Now: Plugin searches all streams in priority order to find one with `tv_archive=1`
+  - IPTV clients now correctly see "Catch-up available" even when highest-quality stream lacks it
+  - Timeshift requests automatically use the catch-up-enabled stream (transparent to user)
+  - Maintains stream priority for live TV (top stream still preferred for live playback)
+  - Example: BBC One has Sky (no catch-up) and IPTV (with catch-up) → Users can now watch catch-up from IPTV stream
+  - Modified 3 functions across 2 files: `_patch_xc_get_live_streams()`, `_patch_xc_get_epg()`, `timeshift_proxy()`
+  - Backward compatible: Single-stream channels work identically
 
 ### v1.1.8
 - **Documentation**: Improved installation instructions
