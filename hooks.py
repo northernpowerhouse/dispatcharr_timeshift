@@ -187,6 +187,28 @@ def _patch_xc_get_live_streams():
                         logger.info(f"[Timeshift] API: Channel not found for internal_id={original_stream_id}")
                     continue
 
+                # ✅ NEW: Check ALL streams for catch-up support (fallback chain)
+                tv_archive = 0
+                tv_archive_duration = 0
+                catchup_stream = None
+
+                if debug:
+                    logger.info(f"[Timeshift] API: Scanning {channel.name} for catch-up support...")
+
+                for stream in channel.streams.order_by('channelstream__order'):
+                    stream_props = stream.custom_properties or {}
+                    if int(stream_props.get('tv_archive', 0)):
+                        tv_archive = 1
+                        tv_archive_duration = int(stream_props.get('tv_archive_duration', 0))
+                        catchup_stream = stream
+                        if debug:
+                            logger.info(f"[Timeshift] API:   {stream.name}: tv_archive=1 ✅ (duration={tv_archive_duration}d)")
+                        break  # Use first stream with catch-up
+                    else:
+                        if debug:
+                            logger.info(f"[Timeshift] API:   {stream.name}: tv_archive=0")
+
+                # Get first stream for provider_stream_id (API response needs it)
                 first_stream = channel.streams.order_by('channelstream__order').first()
                 if not first_stream:
                     if debug:
@@ -195,18 +217,16 @@ def _patch_xc_get_live_streams():
 
                 props = first_stream.custom_properties or {}
 
-                # Add tv_archive values
-                tv_archive = int(props.get('tv_archive', 0))
+                # Add tv_archive values (based on ANY stream with catch-up)
                 stream_data['tv_archive'] = tv_archive
-                stream_data['tv_archive_duration'] = int(props.get('tv_archive_duration', 0))
+                stream_data['tv_archive_duration'] = tv_archive_duration
 
                 if tv_archive:
                     timeshift_count += 1
                     if debug:
-                        logger.info(f"[Timeshift] API: {channel.name} → tv_archive=1, duration={stream_data['tv_archive_duration']}d")
+                        logger.info(f"[Timeshift] API: {channel.name} → tv_archive=1 (from {catchup_stream.name if catchup_stream else 'unknown'}), duration={stream_data['tv_archive_duration']}d")
 
-                # Replace stream_id with provider's stream_id
-                # This is needed for iPlayTV to construct correct timeshift URLs
+                # Replace stream_id with provider's stream_id (use first stream for consistency)
                 provider_stream_id = props.get('stream_id')
                 if provider_stream_id:
                     if debug:
@@ -484,13 +504,33 @@ def _patch_xc_get_epg():
                 logger.error(f"[Timeshift] EPG: Channel not found for stream_id={channel_id}")
                 raise Http404()
 
-            # Check if channel has tv_archive enabled
-            first_stream = channel.streams.order_by('channelstream__order').first()
-            props = first_stream.custom_properties or {} if first_stream else {}
-            has_tv_archive = props.get('tv_archive') in (1, '1')
+            # ✅ NEW: Find first stream in channel with catch-up support
+            catchup_stream = None
+            has_tv_archive = False
 
             if debug:
-                logger.info(f"[Timeshift] EPG: {channel.name} tv_archive={has_tv_archive}, props={props}")
+                logger.info(f"[Timeshift] EPG: Scanning {channel.name} for catch-up stream...")
+
+            for stream in channel.streams.order_by('channelstream__order'):
+                stream_props = stream.custom_properties or {}
+                if int(stream_props.get('tv_archive', 0)):
+                    catchup_stream = stream
+                    has_tv_archive = True
+                    if debug:
+                        logger.info(f"[Timeshift] EPG: Using catch-up stream: {stream.name}")
+                    break
+                else:
+                    if debug:
+                        logger.info(f"[Timeshift] EPG:   {stream.name}: no catch-up")
+
+            # Use first stream if no catch-up stream found (for consistency)
+            if not catchup_stream:
+                catchup_stream = channel.streams.order_by('channelstream__order').first()
+
+            props = catchup_stream.custom_properties or {} if catchup_stream else {}
+
+            if debug:
+                logger.info(f"[Timeshift] EPG: {channel.name} tv_archive={has_tv_archive}, stream={catchup_stream.name if catchup_stream else 'none'}")
 
             if has_tv_archive and not short:
                 # CUSTOM EPG RESPONSE: Include past programs for timeshift
